@@ -49,6 +49,7 @@ function setupFilters() {
 }
 
 const bookingMemoryKey = 'abc-tutoring-booked-slots';
+const bookingRequestMemoryKey = 'abc-tutoring-booking-requests';
 
 function getBookedSlots() {
   try { return JSON.parse(localStorage.getItem(bookingMemoryKey)) || []; }
@@ -59,6 +60,28 @@ function rememberBookedSlot(tutorId, slot) {
   const booked = getBookedSlots();
   const booking = `${tutorId}::${slot}`;
   if (!booked.includes(booking)) localStorage.setItem(bookingMemoryKey, JSON.stringify([...booked, booking]));
+}
+
+function rememberBookingRequest(data, tutor) {
+  const request = {
+    id: `request-${Date.now()}`,
+    submittedAt: new Date().toISOString(),
+    tutorId: tutor.id,
+    tutorName: tutor.name,
+    subject: data.get('subject'),
+    slot: data.get('slot'),
+    parentName: data.get('parentName'),
+    email: data.get('email'),
+    studentName: data.get('studentName'),
+    grade: data.get('grade'),
+    notes: data.get('notes')
+  };
+  try {
+    const requests = JSON.parse(localStorage.getItem(bookingRequestMemoryKey)) || [];
+    localStorage.setItem(bookingRequestMemoryKey, JSON.stringify([...requests, request]));
+  } catch {
+    // The form remains usable when browser storage is unavailable.
+  }
 }
 
 async function loadAvailability() {
@@ -98,6 +121,7 @@ async function setupBooking() {
     event.preventDefault();
     const data = new FormData(form); const tutor = byId(data.get('tutor'));
     if (!tutor) return;
+    rememberBookingRequest(data, tutor);
     rememberBookedSlot(tutor.id, data.get('slot'));
     document.querySelector('#success-message').textContent = `Thanks, ${data.get('parentName').split(' ')[0]}! We’ve penciled in ${data.get('slot')} with ${tutor.name}. Dana will send confirmation details to ${data.get('email')}.`;
     document.querySelector('#success-modal').hidden = false;

@@ -9,6 +9,7 @@ const tutors = [
 
 const byId = id => tutors.find(tutor => tutor.id === id);
 const subjectFromQuery = new URLSearchParams(location.search).get('subject');
+const track = (event, properties) => window.abcTrack?.(event, properties);
 
 function renderTutors(filter = 'All') {
   const grid = document.querySelector('#tutor-grid');
@@ -31,9 +32,19 @@ function renderTutors(filter = 'All') {
       </div>
     </article>`).join('');
   grid.querySelectorAll('[data-tutor-card]').forEach(card => {
-    const toggle = () => card.classList.toggle('is-flipped');
+    const tutor = byId(card.querySelector('.card-book')?.href.split('tutor=')[1]);
+    const toggle = () => {
+      const isOpening = !card.classList.contains('is-flipped');
+      card.classList.toggle('is-flipped');
+      if (isOpening && tutor) {
+        track('tutor_profile_viewed', { tutor_id: tutor.id, subject: tutor.subject });
+      }
+    };
     card.addEventListener('click', event => { if (!event.target.closest('a')) toggle(); });
     card.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } });
+    card.querySelector('.card-book')?.addEventListener('click', () => {
+      if (tutor) track('booking_cta_clicked', { tutor_id: tutor.id, subject: tutor.subject, placement: 'tutor_card' });
+    });
   });
 }
 
@@ -44,7 +55,11 @@ function setupFilters() {
   renderTutors(initial);
   filters.forEach(button => {
     button.classList.toggle('active', button.dataset.filter === initial);
-    button.addEventListener('click', () => { filters.forEach(b => b.classList.toggle('active', b === button)); renderTutors(button.dataset.filter); });
+    button.addEventListener('click', () => {
+      filters.forEach(b => b.classList.toggle('active', b === button));
+      renderTutors(button.dataset.filter);
+      track('subject_filter_selected', { subject: button.dataset.filter });
+    });
   });
 }
 
@@ -103,6 +118,22 @@ async function setupBooking() {
   const availBox = document.querySelector('#availability-box');
   const availText = document.querySelector('#availability-text');
   const availability = await loadAvailability();
+  let bookingStarted = false;
+  let bookingSubmitted = false;
+  const selectedProperties = () => {
+    const tutor = byId(tutorSelect.value);
+    return {
+      tutor_id: tutor?.id || undefined,
+      subject: subjectSelect.value || tutor?.subject || undefined,
+      grade_band: form.elements.grade?.value || undefined,
+      has_slot_selected: Boolean(form.querySelector('input[name="slot"]:checked')),
+    };
+  };
+  const markBookingStarted = () => {
+    if (bookingStarted) return;
+    bookingStarted = true;
+    track('booking_started', selectedProperties());
+  };
   tutorSelect.insertAdjacentHTML('beforeend', tutors.map(t => `<option value="${t.id}">${t.name} · ${t.subject}</option>`).join(''));
   const updateTutor = () => {
     const tutor = byId(tutorSelect.value);
@@ -114,17 +145,46 @@ async function setupBooking() {
       ? openSlots.map((slot, index) => `<label class="slot-option"><input type="radio" name="slot" value="${slot}" required ${index === 0 ? 'checked' : ''}/><span>${slot}</span></label>`).join('')
       : '<p class="slot-placeholder">This tutor is fully booked in this browser. Please choose another tutor.</p>';
   };
-  tutorSelect.addEventListener('change', updateTutor);
+  tutorSelect.addEventListener('change', () => {
+    updateTutor();
+    markBookingStarted();
+    const tutor = byId(tutorSelect.value);
+    if (tutor) track('tutor_selected_for_booking', { tutor_id: tutor.id, subject: tutor.subject });
+  });
+  subjectSelect.addEventListener('change', () => {
+    markBookingStarted();
+    track('booking_subject_selected', { subject: subjectSelect.value || undefined });
+  });
+  form.addEventListener('focusin', markBookingStarted, { once: true });
+  slots.addEventListener('change', event => {
+    if (!event.target.matches('input[name="slot"]')) return;
+    markBookingStarted();
+    track('booking_slot_selected', selectedProperties());
+  });
   const selectedId = new URLSearchParams(location.search).get('tutor');
-  if (byId(selectedId)) { tutorSelect.value = selectedId; updateTutor(); }
+  if (byId(selectedId)) {
+    tutorSelect.value = selectedId;
+    updateTutor();
+    track('booking_page_opened_with_tutor', { tutor_id: selectedId, subject: byId(selectedId).subject });
+  }
   form.addEventListener('submit', event => {
     event.preventDefault();
     const data = new FormData(form); const tutor = byId(data.get('tutor'));
     if (!tutor) return;
     rememberBookingRequest(data, tutor);
     rememberBookedSlot(tutor.id, data.get('slot'));
+    bookingSubmitted = true;
+    track('booking_request_submitted', {
+      tutor_id: tutor.id,
+      subject: data.get('subject'),
+      grade_band: data.get('grade'),
+      has_slot_selected: Boolean(data.get('slot')),
+    });
     document.querySelector('#success-message').textContent = `Thanks, ${data.get('parentName').split(' ')[0]}! We’ve penciled in ${data.get('slot')} with ${tutor.name}. Dana will send confirmation details to ${data.get('email')}.`;
     document.querySelector('#success-modal').hidden = false;
+  });
+  window.addEventListener('pagehide', () => {
+    if (bookingStarted && !bookingSubmitted) track('booking_abandoned', selectedProperties());
   });
 }
 

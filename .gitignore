@@ -1,3 +1,5 @@
 transcript.txt
 .DS_Store
 .insforge/
+.env
+posthog-config.js
